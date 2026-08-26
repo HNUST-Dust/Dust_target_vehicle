@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>靶车控制台 — STM32 串口命令</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0b1120; color: #e2e8f0; min-height: 100vh; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+
+        /* 自定义滑块 */
+        input[type="range"] { -webkit-appearance: none; height: 6px; background: #334155; border-radius: 3px; outline: none; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; background: #3b82f6; border-radius: 50%; cursor: pointer; }
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+        /* 开关动画 */
+        .switch-track { transition: background 0.25s; }
+        .switch-thumb { transition: transform 0.25s; }
+        input:checked + .switch-track { background: #3b82f6; }
+        input:checked + .switch-track .switch-thumb { transform: translateX(20px); }
+
+        /* 按钮动效 */
+        .btn-press:active { transform: scale(0.96); }
+        .glow-red { box-shadow: 0 0 30px rgba(239,68,68,0.3); }
+        .glow-blue { box-shadow: 0 0 20px rgba(59,130,246,0.2); }
+
+        /* 终端闪烁光标 */
+        .cursor-blink::after { content: ' ▌'; animation: blink 1s infinite; }
+        @keyframes blink { 0%,50% { opacity: 1; } 51%,100% { opacity: 0; } }
+    </style>
+</head>
+<body class="p-4 md:p-6 flex flex-col items-center">
+
+    <!-- ═══════════════════════════════════════════════════════
+         顶栏：标题 + 串口连接
+         ═══════════════════════════════════════════════════════ -->
+    <header class="w-full max-w-6xl mb-6 flex flex-col md:flex-row justify-between items-center
+                   bg-slate-900/80 backdrop-blur p-5 rounded-2xl border border-slate-700/50">
+        <div>
+            <h1 class="text-2xl md:text-3xl font-bold bg-gradient-to-r from-blue-400 to-cyan-400
+                       bg-clip-text text-transparent">
+                🎯 靶车控制台
+            </h1>
+            <p class="text-slate-500 text-xs mt-1">UART7 · 9600 8N1 · 8字节命令帧</p>
+        </div>
+        <div class="flex items-center gap-4 mt-3 md:mt-0">
+            <span id="connStatus" class="flex items-center gap-2 text-slate-400 text-sm">
+                <span class="w-2 h-2 rounded-full bg-slate-500 inline-block"></span>
+                未连接
+            </span>
+            <button id="connectBtn"
+                    class="bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6
+                           rounded-lg transition-all btn-press text-sm">
+                🔌 连接串口
+            </button>
+        </div>
+    </header>
+
+    <!-- ═══════════════════════════════════════════════════════
+         主体：三列卡片布局
+         ═══════════════════════════════════════════════════════ -->
+    <main class="w-full max-w-6xl grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+
+        <!-- ── 卡片 1：底盘控制 ── -->
+        <div class="lg:col-span-2 bg-slate-900/70 rounded-2xl border border-blue-900/30 p-5
+                    flex flex-col gap-4 glow-blue">
+            <div class="flex items-center gap-3">
+                <span class="text-2xl">🚗</span>
+                <h2 class="text-lg font-semibold text-blue-300">底盘控制</h2>
+                <span class="text-xs text-slate-500 bg-slate-800 px-2 py-0.5 rounded">CMD 0x10 / 0x11</span>
+            </div>
+
+            <!-- 参数区 -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <!-- 距离 -->
+                <div class="flex flex-col gap-1.5">
+                    <div class="flex justify-between text-xs text-slate-400">
+                        <span>单程距离</span>
+                        <span id="distDisplay" class="text-blue-300 font-mono">3.0 m</span>
+                    </div>
+                    <input type="range" id="distSlider" min="5" max="100" value="30" step="1"
+                           class="w-full" oninput="onDistChange(this.value)">
+                    <div class="flex gap-2">
+                        <input type="number" id="distInput" value="30" min="1" max="255"
+                               class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm
+                                      text-center focus:outline-none focus:border-blue-500"
+                               onchange="onDistInput(this.value)">
+                        <span class="text-xs text-slate-500 self-center">×0.1m</span>
+                    </div>
+                </div>
+                <!-- 速度 -->
+                <div class="flex flex-col gap-1.5">
+                    <label class="text-xs text-slate-400">输出轴速度</label>
+                    <input type="number" id="chassisSpeed" value="100" min="0" max="255"
+                           class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm
+                                  text-center focus:outline-none focus:border-blue-500">
+                    <span class="text-xs text-slate-500 self-center">RPM</span>
+                </div>
+                <!-- 加速度 -->
+                <div class="flex flex-col gap-1.5">
+                    <label class="text-xs text-slate-400">加速度</label>
+                    <input type="number" id="chassisAccel" value="0" min="0" max="255"
+                           class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm
+                                  text-center focus:outline-none focus:border-blue-500">
+                    <span class="text-xs text-slate-500 self-center">0~255</span>
+                </div>
+            </div>
+
+            <!-- 操作按钮行 -->
+            <div class="flex items-center gap-3 pt-2">
+                <button onclick="sendChassisCfg()"
+                        class="bg-blue-600/70 hover:bg-blue-500 text-white text-sm font-medium
+                               py-2 px-5 rounded-lg transition-all btn-press">
+                    ⚙ 设置参数
+                </button>
+                <button id="chassisGoBtn" onclick="toggleChassisGo()"
+                        class="bg-slate-700 hover:bg-emerald-600 text-white text-sm font-medium
+                               py-2 px-6 rounded-lg transition-all btn-press">
+                    ▶ 启动
+                </button>
+                <span id="chassisRunStatus" class="text-xs text-slate-500">已停止</span>
+            </div>
+        </div>
+
+        <!-- ── 卡片 2：云台控制 ── -->
+        <div class="bg-slate-900/70 rounded-2xl border border-emerald-900/30 p-5 flex flex-col gap-4">
+            <div class="flex items-center gap-3">
+                <span class="text-2xl">🎯</span>
+                <h2 class="text-lg font-semibold text-emerald-300">云台控制</h2>
+                <span class="text-xs text-slate-500 bg-slate-800 px-2 py-0.5 rounded">0x20 / 0x21</span>
+            </div>
+
+            <!-- 模式选择 -->
+            <div class="flex flex-col gap-2">
+                <label class="text-xs text-slate-400">云台模式</label>
+                <div class="flex gap-2">
+                    <button id="gimbalFixedBtn" onclick="setGimbalMode(1)"
+                            class="flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all btn-press
+                                   bg-emerald-600/30 text-emerald-300 border border-emerald-500/50">
+                        📌 固定速度
+                    </button>
+                    <button id="gimbalRangeBtn" onclick="setGimbalMode(2)"
+                            class="flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all btn-press
+                                   bg-slate-700 text-slate-300 border border-slate-600">
+                        🔄 区间变速
+                    </button>
+                </div>
+            </div>
+
+            <!-- 速度1：固定速度值 / 区间最低速度 -->
+            <div class="flex flex-col gap-1.5">
+                <label id="gimbalSpeed1Label" class="text-xs text-slate-400">速度</label>
+                <div class="flex gap-2">
+                    <input type="number" id="gimbalSpeed" value="14" min="0" max="30" step="0.5"
+                           class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm
+                                  text-center focus:outline-none focus:border-emerald-500">
+                    <span class="text-xs text-slate-500 self-center whitespace-nowrap">rad/s</span>
+                </div>
+            </div>
+
+            <!-- 速度2：区间最高速度（仅区间模式可见） -->
+            <div id="gimbalSpeedMaxGroup" class="flex flex-col gap-1.5 hidden">
+                <label class="text-xs text-slate-400">最高速度</label>
+                <div class="flex gap-2">
+                    <input type="number" id="gimbalSpeedMax" value="25" min="0" max="30" step="0.5"
+                           class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm
+                                  text-center focus:outline-none focus:border-emerald-500">
+                    <span class="text-xs text-slate-500 self-center whitespace-nowrap">rad/s</span>
+                </div>
+                <span class="text-xs text-amber-400/70">必须大于最低速度</span>
+            </div>
+
+            <!-- 加速度 -->
+            <div class="flex flex-col gap-1.5">
+                <label class="text-xs text-slate-400">加速度</label>
+                <div class="flex gap-2">
+                    <input type="number" id="gimbalAccel" value="5" min="0" max="50" step="0.5"
+                           class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm
+                                  text-center focus:outline-none focus:border-emerald-500">
+                    <span class="text-xs text-slate-500 self-center whitespace-nowrap">rad/s²</span>
+                </div>
+                <span class="text-xs text-slate-500 self-center">0 = 瞬变（跳过斜坡）</span>
+            </div>
+
+            <!-- 操作按钮 -->
+            <div class="flex items-center gap-3 pt-1">
+                <button onclick="sendGimbalCfg()"
+                        class="bg-emerald-600/70 hover:bg-emerald-500 text-white text-sm font-medium
+                               py-2 px-4 rounded-lg transition-all btn-press">
+                    ⚙ 设置参数
+                </button>
+                <button id="gimbalGoBtn" onclick="toggleGimbalGo()"
+                        class="bg-slate-700 hover:bg-emerald-600 text-white text-sm font-medium
+                               py-2 px-5 rounded-lg transition-all btn-press">
+                    ▶ 启动
+                </button>
+                <span id="gimbalRunStatus" class="text-xs text-slate-500">已停止</span>
+            </div>
+        </div>
+
+        <!-- ── 卡片 3：装甲板 + 急停 ── -->
+        <div class="bg-slate-900/70 rounded-2xl border border-amber-900/30 p-5 flex flex-col gap-4">
+            <div class="flex items-center gap-3">
+                <span class="text-2xl">🛡️</span>
+                <h2 class="text-lg font-semibold text-amber-300">装甲板</h2>
+                <span class="text-xs text-slate-500 bg-slate-800 px-2 py-0.5 rounded">0x30</span>
+            </div>
+
+            <!-- 电机选择 -->
+            <div class="flex flex-col gap-1.5">
+                <label class="text-xs text-slate-400">电机选择</label>
+                <select id="armorMotor"
+                        class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm
+                               focus:outline-none focus:border-amber-500">
+                    <option value="0">0 — 全部并联</option>
+                    <option value="1">1 — 1号电机</option>
+                    <option value="2">2 — 2号电机</option>
+                </select>
+            </div>
+
+            <!-- 加速度 -->
+            <div class="flex flex-col gap-1.5">
+                <label class="text-xs text-slate-400">加速度</label>
+                <input type="number" id="armorAccel" value="0" min="0" max="255"
+                       class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm
+                              text-center focus:outline-none focus:border-amber-500">
+                <span class="text-xs text-slate-500 self-center">0~255</span>
+            </div>
+
+            <button onclick="sendArmorCfg()"
+                    class="bg-amber-600/70 hover:bg-amber-500 text-white text-sm font-medium
+                           py-2 px-4 rounded-lg transition-all btn-press">
+                ⚙ 设置参数
+            </button>
+
+            <!-- 紧急停止 — 大红色按钮 -->
+            <button onclick="sendAllStop()"
+                    class="bg-red-700 hover:bg-red-600 text-white font-bold py-3.5 px-4 rounded-xl
+                           transition-all btn-press glow-red text-lg mt-2">
+                ⏹ 紧急停止
+            </button>
+        </div>
+
+        <!-- ── 卡片 4：日志终端（全宽） ── -->
+        <div class="md:col-span-2 lg:col-span-4 bg-slate-900/80 rounded-2xl border border-slate-700/50
+                    flex flex-col h-64">
+            <div class="flex justify-between items-center px-5 py-3 border-b border-slate-700/50">
+                <h2 class="text-sm font-semibold text-slate-300">📡 发送日志</h2>
+                <button onclick="clearLog()" class="text-xs text-slate-500 hover:text-white transition-colors">
+                    🗑 清空
+                </button>
+            </div>
+            <div id="logArea" class="flex-1 overflow-y-auto p-4 font-mono text-xs space-y-0.5 bg-black/30 rounded-b-2xl">
+                <div class="text-slate-600 cursor-blink">等待发送命令...</div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed bottom-8 right-8 bg-slate-800 border-l-4 text-white px-5 py-3
+                            rounded-lg shadow-2xl transform translate-y-24 opacity-0
+                            transition-all duration-300 z-50 text-sm font-medium">
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════
+         JavaScript — 协议层 + UI 层
+         ═══════════════════════════════════════════════════════ -->
+    <script>
+    /* ==========================================================
+     *  📋 【协议配置区】— 改协议只需改这里
+     * ========================================================== */
+    const PROTO = {
+        HEADER:     0xA5,   // 帧头
+        FRAME_SIZE: 8,      // 帧长
+
+        // 命令字（跟 STM32 cmd_protocol.h 一一对应）
+        CMD: {
+            CHASSIS_CFG: 0x10,  // 底盘参数: D0=距离(0.1m) D1=速度(RPM) D2=加速度
+            CHASSIS_GO:  0x11,  // 底盘执行: D0=0停/1动
+            GIMBAL_CFG:  0x20,  // 云台参数: D0=模式 D1=固定速度
+            GIMBAL_GO:   0x21,  // 云台执行: D0=0停/1启动
+            ARMOR_CFG:   0x30,  // 装甲板:   D0=电机号 D1=加速度
+            ALL_STOP:    0xFF,  // 紧急停止
+            HEARTBEAT:   0X01,  //心跳（断连检测）
+        },
+    };
+
+    /* ==========================================================
+     *  🔧 【核心函数】sendCmdFrame — 所有命令都通过它发送
+     *
+     *  参数：
+     *    cmd  — 命令字 (0x10, 0x11, ...)
+     *    d0~d4 — 5 字节数据，不用的填 0
+     *
+     *  自动计算 XOR 校验，拼成 8 字节帧发送。
+     *
+     *  【新增命令的方法】
+     *    1. 在 PROTO.CMD 加一行定义
+     *    2. 写一个 sendXxx() 函数调用 sendCmdFrame
+     *    3. 在 HTML 加按钮 onclick 调用
+     *  — 就这三步，不用改任何底层代码。
+     * ========================================================== */
+    function sendCmdFrame(cmd, d0, d1, d2, d3, d4) {
+        if (!isConnected) {
+            showToast('⚠️ 请先连接串口', 'red');
+            return false;
+        }
+        const f = new Uint8Array(8);
+        f[0] = PROTO.HEADER;
+        f[1] = cmd;
+        f[2] = d0;
+        f[3] = d1;
+        f[4] = d2;
+        f[5] = d3;
+        f[6] = d4;
+
+        // XOR 校验
+        let xor = 0;
+        for (let i = 0; i < 7; i++) xor ^= f[i];
+        f[7] = xor;
+
+        sendBuffer(f);   // 不等待，fire-and-forget，writer 用完自动释放
+        return true;
+    }
+     let heartbeatTimer = null;
+    function sendHeartbeat() {
+        if (!isConnected) return;
+        sendCmdFrame(PROTO.CMD.HEARTBEAT, 0, 0, 0, 0, 0);
+    }
+
+    /* ==========================================================
+     *  📤 底盘控制
+     * ========================================================== */
+    let chassisRunning = false;
+
+    function onDistChange(val) {
+        const meters = (val * 0.1).toFixed(1);
+        document.getElementById('distDisplay').textContent = meters + ' m';
+        document.getElementById('distInput').value = val;
+    }
+
+    function onDistInput(val) {
+        let v = parseInt(val) || 30;
+        if (v < 1) v = 1;
+        if (v > 255) v = 255;
+        document.getElementById('distSlider').value = v;
+        const meters = (v * 0.1).toFixed(1);
+        document.getElementById('distDisplay').textContent = meters + ' m';
+        document.getElementById('distInput').value = v;
+    }
+
+    function sendChassisCfg() {
+        const dist  = parseInt(document.getElementById('distInput').value) || 30;
+        const speed = parseInt(document.getElementById('chassisSpeed').value) || 100;
+        const accel = parseInt(document.getElementById('chassisAccel').value) || 0;
+        if (sendCmdFrame(PROTO.CMD.CHASSIS_CFG, dist, speed, accel, 0, 0)) {
+            logSend('CHASSIS_CFG', `距离=${(dist*0.1).toFixed(1)}m  速度=${speed}RPM  加速度=${accel}`);
+        }
+    }
+
+    function toggleChassisGo() {
+        chassisRunning = !chassisRunning;
+        const btn = document.getElementById('chassisGoBtn');
+        const status = document.getElementById('chassisRunStatus');
+        if (chassisRunning) {
+            btn.textContent = '⏹ 停止';
+            btn.classList.replace('hover:bg-emerald-600', 'hover:bg-red-500');
+            btn.classList.replace('bg-slate-700', 'bg-red-600/70');
+            status.textContent = '运行中...';
+            status.className = 'text-xs text-emerald-400';
+            sendCmdFrame(PROTO.CMD.CHASSIS_GO, 1, 0, 0, 0, 0);
+            logSend('CHASSIS_GO', '启动');
+        } else {
+            btn.textContent = '▶ 启动';
+            btn.classList.replace('hover:bg-red-500', 'hover:bg-emerald-600');
+            btn.classList.replace('bg-red-600/70', 'bg-slate-700');
+            status.textContent = '已停止';
+            status.className = 'text-xs text-slate-500';
+            sendCmdFrame(PROTO.CMD.CHASSIS_GO, 0, 0, 0, 0, 0);
+            logSend('CHASSIS_GO', '停止');
+        }
+    }
+
+    /* ==========================================================
+     *  📤 云台控制
+     * ========================================================== */
+    let gimbalMode = 1;  // 1=固定速度, 2=区间变速
+    let gimbalRunning = false;
+
+    function setGimbalMode(mode) {
+        gimbalMode = mode;
+        const fBtn  = document.getElementById('gimbalFixedBtn');
+        const rBtn  = document.getElementById('gimbalRangeBtn');
+        const maxGrp = document.getElementById('gimbalSpeedMaxGroup');
+        const label  = document.getElementById('gimbalSpeed1Label');
+
+        if (mode === 1) {
+            // 固定速度
+            fBtn.className  = 'flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all btn-press ' +
+                              'bg-emerald-600/30 text-emerald-300 border border-emerald-500/50';
+            rBtn.className  = 'flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all btn-press ' +
+                              'bg-slate-700 text-slate-400 border border-slate-600';
+            maxGrp.classList.add('hidden');
+            label.textContent = '速度';
+        } else {
+            // 区间变速
+            rBtn.className  = 'flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all btn-press ' +
+                              'bg-purple-600/30 text-purple-300 border border-purple-500/50';
+            fBtn.className  = 'flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all btn-press ' +
+                              'bg-slate-700 text-slate-400 border border-slate-600';
+            maxGrp.classList.remove('hidden');
+            label.textContent = '区间最低速度';
+        }
+    }
+
+    function sendGimbalCfg() {
+        const speedRadS  = parseFloat(document.getElementById('gimbalSpeed').value) || 0;
+        const maxRadS    = parseFloat(document.getElementById('gimbalSpeedMax').value) || 0;
+        const accelRadS2 = parseFloat(document.getElementById('gimbalAccel').value) || 0;
+
+        /* 换算为协议层的 0~255 字节 */
+        const speedLow  = Math.round(speedRadS  * 255.0 / 30.0);
+        const speedHigh = Math.round(maxRadS    * 255.0 / 30.0);
+        const accel     = Math.round(accelRadS2 * 255.0 / 50.0);
+
+        let detail;
+        if (gimbalMode === 1) {
+            detail = `固定速度=${speedRadS.toFixed(1)} rad/s  加速度=${accelRadS2.toFixed(1)} rad/s²`;
+        } else {
+            if (maxRadS <= speedRadS) {
+                showToast('⚠️ 最高速度必须大于最低速度', 'red');
+                return;
+            }
+            detail = `区间变速 ${speedRadS.toFixed(1)}↔${maxRadS.toFixed(1)} rad/s  加速度=${accelRadS2.toFixed(1)} rad/s²`;
+        }
+
+        if (sendCmdFrame(PROTO.CMD.GIMBAL_CFG, gimbalMode, speedLow, speedHigh, accel, 0)) {
+            logSend('GIMBAL_CFG', detail);
+        }
+    }
+
+    function toggleGimbalGo() {
+        gimbalRunning = !gimbalRunning;
+        const btn    = document.getElementById('gimbalGoBtn');
+        const status = document.getElementById('gimbalRunStatus');
+        if (gimbalRunning) {
+            // 先发参数再启动，保证 STM32 拿到最新配置
+            sendGimbalCfg();
+            btn.textContent = '⏹ 停止';
+            btn.classList.replace('hover:bg-emerald-600', 'hover:bg-red-500');
+            btn.classList.replace('bg-slate-700', 'bg-red-600/70');
+            status.textContent = '运行中...';
+            status.className = 'text-xs text-emerald-400';
+            sendCmdFrame(PROTO.CMD.GIMBAL_GO, 1, 0, 0, 0, 0);
+            logSend('GIMBAL_GO', '启动');
+        } else {
+            btn.textContent = '▶ 启动';
+            btn.classList.replace('hover:bg-red-500', 'hover:bg-emerald-600');
+            btn.classList.replace('bg-red-600/70', 'bg-slate-700');
+            status.textContent = '已停止';
+            status.className = 'text-xs text-slate-500';
+            sendCmdFrame(PROTO.CMD.GIMBAL_GO, 0, 0, 0, 0, 0);
+            logSend('GIMBAL_GO', '停止');
+        }
+    }
+
+    /* ==========================================================
+     *  📤 装甲板控制
+     * ========================================================== */
+    function sendArmorCfg() {
+        const motor = parseInt(document.getElementById('armorMotor').value) || 0;
+        const accel = parseInt(document.getElementById('armorAccel').value) || 0;
+        if (sendCmdFrame(PROTO.CMD.ARMOR_CFG, motor, accel, 0, 0, 0)) {
+            logSend('ARMOR_CFG', `电机=${motor}  加速度=${accel}`);
+        }
+    }
+
+    /* ==========================================================
+     *  📤 紧急停止
+     * ========================================================== */
+    function sendAllStop() {
+        if (sendCmdFrame(PROTO.CMD.ALL_STOP, 0, 0, 0, 0, 0)) {
+            // 同步重置所有 UI 状态
+            chassisRunning = false;
+            gimbalRunning = false;
+            const cBtn = document.getElementById('chassisGoBtn');
+            cBtn.textContent = '▶ 启动';
+            cBtn.classList.replace('hover:bg-red-500', 'hover:bg-emerald-600');
+            cBtn.classList.replace('bg-red-600/70', 'bg-slate-700');
+            document.getElementById('chassisRunStatus').textContent = '已停止';
+            document.getElementById('chassisRunStatus').className = 'text-xs text-slate-500';
+
+            const gBtn = document.getElementById('gimbalGoBtn');
+            gBtn.textContent = '▶ 启动';
+            gBtn.classList.replace('hover:bg-red-500', 'hover:bg-emerald-600');
+            gBtn.classList.replace('bg-red-600/70', 'bg-slate-700');
+            document.getElementById('gimbalRunStatus').textContent = '已停止';
+            document.getElementById('gimbalRunStatus').className = 'text-xs text-slate-500';
+
+            logSend('ALL_STOP', '⏹ 紧急停止！全部电机停转');
+            showToast('⏹ 已发送紧急停止', 'red');
+        }
+    }
+
+    /* ==========================================================
+     *  📡 串口底层 (Web Serial API)
+     *
+     *  sendLock 把所有发送串成一条链，保证同一时刻只有
+     *  一个 writer 在用，不会 "WritableStream is locked" 报错。
+     * ========================================================== */
+    let port, isConnected = false;
+    let sendLock = Promise.resolve();
+
+    function sendBuffer(uint8Array) {
+        if (!port || !port.writable) return;
+        sendLock = sendLock.then(async () => {
+            const w = port.writable.getWriter();
+            try {
+                await w.write(uint8Array);
+            } catch (e) {
+                console.error('发送失败', e);
+                showToast('发送失败: ' + e.message, 'red');
+            } finally {
+                w.releaseLock();
+            }
+        });
+    }
+
+    document.getElementById('connectBtn').addEventListener('click', async () => {
+        if (isConnected) {
+            // 断开
+            isConnected = false;
+            try { await port.close(); } catch(e) {}
+            port = null;
+            document.getElementById('connectBtn').textContent = '🔌 连接串口';
+            document.getElementById('connectBtn').className =
+                'bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 ' +
+                'rounded-lg transition-all btn-press text-sm';
+            document.getElementById('connStatus').innerHTML =
+                '<span class="w-2 h-2 rounded-full bg-slate-500 inline-block"></span> 未连接';
+             if (heartbeatTimer) { 
+                clearInterval(heartbeatTimer); heartbeatTimer = null; 
+            }
+            showToast('已断开连接');
+        } else {
+            // 连接
+            try {
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 9600 });
+                isConnected = true;
+                document.getElementById('connectBtn').textContent = '⏻ 断开';
+                document.getElementById('connectBtn').className =
+                    'bg-red-600 hover:bg-red-500 text-white font-semibold py-2.5 px-6 ' +
+                    'rounded-lg transition-all btn-press text-sm';
+                document.getElementById('connStatus').innerHTML =
+                    '<span class="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse"></span> 已连接 (9600)';
+                showToast('✅ 串口连接成功', 'green');
+                heartbeatTimer = setInterval(sendHeartbeat, 500);
+            } catch (e) {
+                if (e.name !== 'NotFoundError') {
+                    showToast('连接失败: ' + e.message, 'red');
+                }
+            }
+        }
+    });
+
+    /* ==========================================================
+     *  📝 日志 + 提示
+     * ========================================================== */
+    function logSend(cmdName, detail) {
+        const area = document.getElementById('logArea');
+        // 首次发送时清掉占位文字
+        if (area.querySelector('.cursor-blink')) area.innerHTML = '';
+
+        const now = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+        const div = document.createElement('div');
+        div.innerHTML = `<span class="text-slate-500">${now}</span>
+                         <span class="text-blue-400 font-semibold">${cmdName}</span>
+                         <span class="text-slate-300">${detail}</span>`;
+        area.appendChild(div);
+        area.scrollTop = area.scrollHeight;
+
+        // 限制日志数量
+        while (area.childElementCount > 200) area.removeChild(area.firstChild);
+    }
+
+    function clearLog() {
+        const area = document.getElementById('logArea');
+        area.innerHTML = '<div class="text-slate-600 cursor-blink">等待发送命令...</div>';
+    }
+
+    let toastTimer;
+    function showToast(msg, color) {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.className = 'fixed bottom-8 right-8 bg-slate-800 border-l-4 text-white px-5 py-3 ' +
+                       'rounded-lg shadow-2xl transform transition-all duration-300 z-50 text-sm font-medium';
+        t.classList.add(color === 'red' ? 'border-red-500' :
+                        color === 'green' ? 'border-emerald-500' : 'border-blue-500');
+        t.classList.remove('translate-y-24', 'opacity-0');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => t.classList.add('translate-y-24', 'opacity-0'), 2500);
+    }
+    </script>
+</body>
+</html>

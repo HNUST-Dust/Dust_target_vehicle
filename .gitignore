@@ -1,0 +1,42 @@
+# ========== 编译产物 ==========
+build/
+*.o
+*.obj
+*.elf
+*.map
+*.bin
+*.hex
+*.su
+*.lst
+
+# CMake 生成
+compile_commands.json
+CMakeCache.txt
+cmake_install.cmake
+CMakeFiles/
+
+# ========== Keil MDK 编译产物 ==========
+MDK-ARM/
+*.crf
+*.d
+*.dep
+*.uvguix.*
+*.bak
+
+# ========== 工具缓存 ==========
+.cache/
+*.pyc
+
+# ========== 用户配置文件（不随仓库上传，含本机路径） ==========
+.clangd
+.mxproject
+CMakePresets.json
+.vscode/
+cmake/.vscode/
+
+# ========== 系统文件 ==========
+Thumbs.db
+Desktop.ini
+
+# ========== 嵌套的旧副本 ==========
+target_vehicle - cmake/
