@@ -15,8 +15,9 @@ extern volatile uint8_t  zdt_enabled;     /* 1=允许 ZDT 控制 */
 extern volatile uint8_t  zdt_homing_req;  /* task_ibus: s1=2 边沿置1, task_zdt: 回零后清0 */
 
 /* 外部可读的 ZDT 状态 */
-extern volatile int32_t  zdt_target[2];       /* 目标位置（编码器刻度）*/
-extern volatile int32_t  zdt_real_pos[2];     /* 真实位置（编码器刻度，0x36 反馈）*/
+extern volatile int32_t  zdt_target[2];       /* 目标位置（编码器刻度，绝对坐标）*/
+extern volatile int32_t  zdt_real_pos[2];     /* 真实位置（编码器刻度，0x36 反馈+offset）*/
+extern volatile int32_t  zdt_abs_offset[2];   /* 驱动器零点对应的物理绝对位置（编码器刻度）*/
 extern volatile uint8_t  zdt_motor_pos_valid[2]; /* 0x36 新反馈到达标志 */
 extern volatile uint8_t  zdt_is_stalled[2];   /* 堵转标志（CAN 接收任务更新）*/
 extern volatile uint8_t  zdt_calibrating[2];  /* 1=正在回零 */

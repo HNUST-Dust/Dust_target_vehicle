@@ -91,8 +91,8 @@ void task_can_recv(void *argument)
             motor_zdt_parse_feedback(msg.data, &fb);
 
             if (fb.cmd == 0x36) {
-                /* 直接存编码器刻度位置，标记新反馈到达（回零锚定用）*/
-                zdt_real_pos[idx] = fb.position;
+                /* 驱动器位置 + 上电恢复偏移 → 绝对坐标；标记新反馈到达 */
+                zdt_real_pos[idx] = fb.position + zdt_abs_offset[idx];
                 zdt_motor_pos_valid[idx] = 1;
             }
             else if (fb.cmd == 0x3A) {
