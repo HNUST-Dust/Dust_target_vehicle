@@ -25,7 +25,7 @@
  #define CMD_CHASSIS_GO    0x11    /*底盘运动控制  D0=0停/1动 */ 
  #define CMD_GIMBAL_CFG    0x20    /*云台参数配置  D0:模式(1固定/2区间) D1:速度1 D2:速度2(区间最大) D3:加速度  */
  #define CMD_GIMBAL_GO     0x21    /* 云台执行: D0=0停/1启动 */
- #define CMD_ARMOR_CFG     0x30    /* 装甲板: D0=电机号, D1=加速度 */
+ #define CMD_ARMOR_MOVE    0x30
  #define CMD_ALL_STOP      0xFF    /* 紧急停止 */
  #define CMD_HEARTBEAT     0x01    /* 心跳 */
 
@@ -38,8 +38,8 @@ extern volatile float    cmd_chassis_dist_m;   /* 单程距离(米) */
 extern volatile float    cmd_chassis_speed;    /* 速度(输出轴RPM) */
 extern volatile uint8_t  cmd_chassis_accel;    /* 加速度 */
 extern volatile uint8_t  cmd_gimbal_mode;      /* 0=停 1=固定速度 2=区间变速 */
-extern volatile uint8_t  cmd_gimbal_speed;     /* 固定速度值 / 区间最低速度 */
-extern volatile uint8_t  cmd_gimbal_speed_max; /* 区间最高速度 */
+extern volatile float    cmd_gimbal_speed;     /* 固定速度值 / 区间最低速度 */
+extern volatile float    cmd_gimbal_speed_max; /* 区间最高速度 */
 extern volatile uint8_t  cmd_gimbal_accel;     /* 加速度(0=无限制, 越大加速越快) */
 extern volatile uint8_t  cmd_gimbal_run;       /* 执行标志 */
 extern volatile uint8_t  cmd_armor_motor;      /* 电机号 */

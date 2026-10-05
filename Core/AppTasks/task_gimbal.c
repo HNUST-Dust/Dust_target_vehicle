@@ -149,26 +149,31 @@ void task_gimbal_loop(void *argument)
 
             if (cmd_gimbal_mode == 2) {
                 /* 区间变速：三角波在 [low, high] 之间往返 */
-                float low  = (float)cmd_gimbal_speed     * CMD_VEL_SCALE;
-                float high = (float)cmd_gimbal_speed_max * CMD_VEL_SCALE;
-                float range = high - low;
-                if (range < 0.5f) range = 0.5f;   /* 防止卡死 */
+                float low  = cmd_gimbal_speed;
+                float high = cmd_gimbal_speed_max;
 
-                float period = 4.0f;   /* 一个完整往返 4 秒 */
+                float range = high - low;
+
+                if (range < 0.5f)
+                    range = 0.5f;
+
+                float period = 4.0f;
                 float half   = period * 0.5f;
 
                 cmd_interval_t += dt;
-                if (cmd_interval_t > period) cmd_interval_t -= period;
+                if (cmd_interval_t > period)
+                    cmd_interval_t -= period;
 
                 if (cmd_interval_t < half)
                     desired_vel = low + range * (cmd_interval_t / half);
                 else
                     desired_vel = high - range * ((cmd_interval_t - half) / half);
+
             } else {
                 /* 模式 1：固定速度 */
-                desired_vel = (float)cmd_gimbal_speed * CMD_VEL_SCALE;
+                desired_vel = cmd_gimbal_speed;
             }
-
+            
             /* 2. 加速度斜坡限制 */
             float accel_rate;
             if (cmd_gimbal_accel == 0) {

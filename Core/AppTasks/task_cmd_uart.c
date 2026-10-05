@@ -5,18 +5,22 @@
 
 
 /* ── 全局控制变量定义（给 cmd_protocol.h 里的 extern 提供实体）── */
-volatile uint8_t  cmd_chassis_mode   = 0;
-volatile float    cmd_chassis_dist_m  = 2.0f;    /* 默认 3 米 */
-volatile float    cmd_chassis_speed   = 100.0f;   /* 默认 100 RPM */
+volatile uint8_t  cmd_chassis_mode    = 0;
+volatile float    cmd_chassis_dist_m  = 2.0f;
+volatile float    cmd_chassis_speed   = 100.0f;
 volatile uint8_t  cmd_chassis_accel   = 0;
+
 volatile uint8_t  cmd_gimbal_mode      = 0;
-volatile uint8_t  cmd_gimbal_speed     = 0;
-volatile uint8_t  cmd_gimbal_speed_max = 0;
+volatile float    cmd_gimbal_speed     = 0.0f;
+volatile float    cmd_gimbal_speed_max = 0.0f;
 volatile uint8_t  cmd_gimbal_accel     = 0;
 volatile uint8_t  cmd_gimbal_run       = 0;
-volatile uint8_t  cmd_armor_motor     = 0;
-volatile uint8_t  cmd_armor_accel     = 0;
-volatile uint32_t  cmd_last_rx_tick    = 0;   /* 上次接收的有效帧 */
+
+volatile uint8_t  cmd_armor_motor = 0;
+volatile uint8_t  cmd_armor_dir   = 0;
+volatile uint8_t  cmd_armor_req   = 0;
+
+volatile uint32_t cmd_last_rx_tick = 0;
 
 /* ── 接收队列句柄 ── */
 static osMessageQueueId_t cmd_uart_queue;
@@ -44,29 +48,40 @@ void CMD_ParseFrame(const uint8_t *f)
             cmd_chassis_mode = f[2];   /*D0=0停/1动*/
             break;
 
-        case CMD_GIMBAL_CFG:        /*云台参数设置*/
-            cmd_gimbal_mode      = f[2];   /*D0:模式 1=固定速度 2=区间变速*/
-            cmd_gimbal_speed     = f[3];   /*D1:固定速度值/区间最低*/
-            cmd_gimbal_speed_max = f[4];   /*D2:区间最高速度*/
-            cmd_gimbal_accel     = f[5];   /*D3:加速度*/
-            break;
+        case CMD_GIMBAL_CFG:        /* 云台参数设置 */
+        cmd_gimbal_mode = f[2];
+
+        cmd_gimbal_speed =
+        (float)((int8_t)f[3]) * 30.0f / 127.0f;
+
+        cmd_gimbal_speed_max =
+        (float)((int8_t)f[4]) * 30.0f / 127.0f;
+
+        cmd_gimbal_accel = f[5];
+
+    break;
 
         case CMD_GIMBAL_GO:         /*云台运动控制*/
             cmd_gimbal_run = f[2];     /*D0=0停/1启动*/
             break;
 
-        case CMD_ARMOR_CFG:         /*装甲板参数设置*/
-            cmd_armor_motor = f[2];    /*D0:电机号*/
-            cmd_armor_accel = f[3];    /*D1:加速度*/
-            break;          
+        case CMD_ARMOR_MOVE:
+            cmd_armor_motor = f[2];   /* 0=两个 1=1号 2=2号 */
+            cmd_armor_dir   = f[3];   /* 1=上升 2=下降 */
+            cmd_armor_req   = 1;      /* 产生一次移动事件 */
+            break;        
 
         case CMD_ALL_STOP:          /*紧急停止*/
             cmd_chassis_mode    = 0;
+            
             cmd_gimbal_mode     = 0;
             cmd_gimbal_run      = 0;
             cmd_gimbal_speed    = 0;
             cmd_gimbal_speed_max = 0;
-            cmd_armor_motor     = 0;
+
+            cmd_armor_motor      = 0;
+            cmd_armor_dir        = 0;
+            cmd_armor_req        = 0;
             break;
 
         default:

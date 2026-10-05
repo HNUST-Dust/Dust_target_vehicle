@@ -15,6 +15,12 @@ volatile uint8_t  zdt_is_stalled[2] = {0, 0};
 volatile uint8_t  zdt_calibrating[2]= {0, 0};
 volatile uint8_t  zdt_homing_req    = 0;
 
+/* ── HTML 装甲板控制（定义在 task_cmd_uart.c） ── */
+extern volatile uint8_t cmd_armor_motor;   /* 0=两个 1=电机1 2=电机2 */
+extern volatile uint8_t cmd_armor_dir;     /* 1=上升 2=下降 */
+extern volatile uint8_t cmd_armor_req;     /* 网页单次移动请求 */
+#define ZDT_WEB_STEP  32768
+
 /* ── 是否已建立绝对坐标（flash 恢复成功或已回零），未建立前禁止位置控制 ── */
 static uint8_t zdt_anchored[2] = {0, 0};
 
@@ -213,20 +219,38 @@ void task_zdt_loop(void *argument)
             }
         }
 
-        /* ── 停稳落盘：目标不变满 ~2s 存一次（防 flash 磨损）── */
+                /* ── 停稳落盘：两个电机目标均不变化满 ~2s 后保存 ── */
         {
-            static int32_t last_t = 0;
+            static int32_t last_t[2] = {0, 0};
             static uint32_t cnt = 0;
-            if (zdt_anchored[0]) {
-                if (zdt_target[0] == last_t) {
-                    if (cnt < 200u) cnt++;
+
+            if (zdt_anchored[0] && zdt_anchored[1]) {
+
+                if (zdt_target[0] == last_t[0] &&
+                    zdt_target[1] == last_t[1]) {
+
+                    if (cnt < 200u)
+                        cnt++;
+
                     if (cnt == 200u) {
+
                         zdt_flash_write();
-                        printf("ZDT saved %ld\r\n", (long)zdt_target[0]);
-                        cnt = 2000u;          /* 存后直到再变化才重存 */
+
+                        printf(
+                            "ZDT saved %ld %ld\r\n",
+                            (long)zdt_target[0],
+                            (long)zdt_target[1]
+                        );
+
+                        /* 保存一次之后不重复保存 */
+                        cnt = 2000u;
                     }
-                } else {
-                    last_t = zdt_target[0];
+                }
+                else {
+
+                    last_t[0] = zdt_target[0];
+                    last_t[1] = zdt_target[1];
+
                     cnt = 0;
                 }
             }
@@ -240,29 +264,209 @@ void task_zdt_loop(void *argument)
         }
 
         /* ── ZDT 位置控制（已锚定才执行绝对定位）── */
-        if (zdt_enabled && zdt_anchored[0] && zdt_anchored[1]
-            && !zdt_calibrating[0] && !zdt_calibrating[1]) {
-            if (zdt_step != 0) {
-                zdt_target[0] += zdt_step;
-                zdt_target[1]  = zdt_target[0];   /* 默认双电机联动 */
+if (zdt_anchored[0] && zdt_anchored[1]
+    && !zdt_calibrating[0] && !zdt_calibrating[1]) {
 
-                if (zdt_target[0] > ZDT_SOFT_LIMIT_TOP) {
-                    zdt_target[0] = ZDT_SOFT_LIMIT_TOP;
-                    zdt_target[1] = ZDT_SOFT_LIMIT_TOP;
-                }
-                if (zdt_target[0] < ZDT_SOFT_LIMIT_BOTTOM) {
-                    zdt_target[0] = ZDT_SOFT_LIMIT_BOTTOM;
-                    zdt_target[1] = ZDT_SOFT_LIMIT_BOTTOM;
-                }
+    /* ═══════════════════════════════════════
+     * HTML 网页单次位置控制
+     * 每收到一个请求，只执行一次
+     * ═══════════════════════════════════════ */
+   /* ═══════════════════════════════════════
+ * HTML 网页单次位置控制
+ * motor:
+ *   0 = 两个电机同时控制
+ *   1 = 只控制1号
+ *   2 = 只控制2号
+ *
+ * dir:
+ *   1 = 上升
+ *   2 = 下降
+ * ═══════════════════════════════════════ */
+if (cmd_armor_req) {
 
-                /* 发 目标-偏移：= 相对"上电点"的位移（例：上电1cm+step2cm
-                 * → 绝对目标3cm → 发 3-1=2cm，不是绝对3cm）。驱动器内部上电归零，
-                 * 这个值让它从上电点走出该位移 = 等效相对运动 */
-                motor_zdt_send_position(1, zdt_target[0] - zdt_abs_offset[0]);
-                motor_zdt_send_position(2, zdt_target[1] - zdt_abs_offset[1]);
+    /* 立即消费请求，保证网页点一次只执行一次 */
+    cmd_armor_req = 0;
+
+    int32_t step = 0;
+
+    if (cmd_armor_dir == 1) {
+        step = ZDT_WEB_STEP;          /* 上升 */
+    }
+    else if (cmd_armor_dir == 2) {
+        step = -ZDT_WEB_STEP;         /* 下降 */
+    }
+    else {
+        step = 0;
+    }
+
+
+    /* ───────────────────────────────
+     * 两个电机同时控制
+     * 两个 target 独立累加、独立钳位
+     * 某一台到限位不影响另外一台继续运动
+     * ─────────────────────────────── */
+    if (cmd_armor_motor == 0 && step != 0) {
+
+        int32_t old_target0 = zdt_target[0];
+        int32_t old_target1 = zdt_target[1];
+
+        /* 两个电机分别累加 */
+        zdt_target[0] += step;
+        zdt_target[1] += step;
+
+
+        /* 1号电机独立钳位 */
+        if (zdt_target[0] > ZDT_SOFT_LIMIT_TOP)
+            zdt_target[0] = ZDT_SOFT_LIMIT_TOP;
+
+        if (zdt_target[0] < ZDT_SOFT_LIMIT_BOTTOM)
+            zdt_target[0] = ZDT_SOFT_LIMIT_BOTTOM;
+
+
+        /* 2号电机独立钳位 */
+        if (zdt_target[1] > ZDT_SOFT_LIMIT_TOP)
+            zdt_target[1] = ZDT_SOFT_LIMIT_TOP;
+
+        if (zdt_target[1] < ZDT_SOFT_LIMIT_BOTTOM)
+            zdt_target[1] = ZDT_SOFT_LIMIT_BOTTOM;
+
+
+        /* 转换成驱动器真正需要收到的位置 */
+        int32_t pos1 =
+            zdt_target[0] - zdt_abs_offset[0];
+
+        int32_t pos2 =
+            zdt_target[1] - zdt_abs_offset[1];
+
+
+        /*
+         * 如果两个驱动器需要收到完全相同的位置参数，
+         * 就直接用 0x00 广播。
+         */
+        if (pos1 == pos2) {
+
+            /*
+             * 至少有一个目标发生变化才发送。
+             * 两个都已经卡在限位就不重复发送。
+             */
+            if (zdt_target[0] != old_target0 ||
+                zdt_target[1] != old_target1) {
+
+                motor_zdt_send_position(ZDT_SYNC_ID, pos1);
             }
         }
 
+        /*
+         * 两个目标不同：
+         * 分别发送。
+         *
+         * 哪台已经被软限位钳住、目标没有变化，
+         * 就不再给那台重复发命令。
+         *
+         * 另一台仍然继续正常移动。
+         */
+        else {
+
+            if (zdt_target[0] != old_target0) {
+                motor_zdt_send_position(
+                    0x01,
+                    pos1
+                );
+            }
+
+            if (zdt_target[1] != old_target1) {
+                motor_zdt_send_position(
+                    0x02,
+                    pos2
+                );
+            }
+        }
+    }
+
+
+    /* ───────────────────────────────
+     * 只控制1号电机
+     * ─────────────────────────────── */
+    else if (cmd_armor_motor == 1 && step != 0) {
+
+        int32_t old_target = zdt_target[0];
+
+        zdt_target[0] += step;
+
+        if (zdt_target[0] > ZDT_SOFT_LIMIT_TOP)
+            zdt_target[0] = ZDT_SOFT_LIMIT_TOP;
+
+        if (zdt_target[0] < ZDT_SOFT_LIMIT_BOTTOM)
+            zdt_target[0] = ZDT_SOFT_LIMIT_BOTTOM;
+
+
+        /* 目标确实变化了才发送 */
+        if (zdt_target[0] != old_target) {
+
+            motor_zdt_send_position(
+                0x01,
+                zdt_target[0] - zdt_abs_offset[0]
+            );
+        }
+    }
+
+
+    /* ───────────────────────────────
+     * 只控制2号电机
+     * ─────────────────────────────── */
+    else if (cmd_armor_motor == 2 && step != 0) {
+
+        int32_t old_target = zdt_target[1];
+
+        zdt_target[1] += step;
+
+        if (zdt_target[1] > ZDT_SOFT_LIMIT_TOP)
+            zdt_target[1] = ZDT_SOFT_LIMIT_TOP;
+
+        if (zdt_target[1] < ZDT_SOFT_LIMIT_BOTTOM)
+            zdt_target[1] = ZDT_SOFT_LIMIT_BOTTOM;
+
+
+        /* 目标确实变化了才发送 */
+        if (zdt_target[1] != old_target) {
+
+            motor_zdt_send_position(
+                0x02,
+                zdt_target[1] - zdt_abs_offset[1]
+            );
+        }
+    }
+}
+
+    /* ═══════════════════════════════════════
+     * 原来的遥控器控制
+     * ═══════════════════════════════════════ */
+    if (zdt_enabled && zdt_step != 0) {
+
+        zdt_target[0] += zdt_step;
+        zdt_target[1] = zdt_target[0];
+
+        if (zdt_target[0] > ZDT_SOFT_LIMIT_TOP) {
+            zdt_target[0] = ZDT_SOFT_LIMIT_TOP;
+            zdt_target[1] = ZDT_SOFT_LIMIT_TOP;
+        }
+
+        if (zdt_target[0] < ZDT_SOFT_LIMIT_BOTTOM) {
+            zdt_target[0] = ZDT_SOFT_LIMIT_BOTTOM;
+            zdt_target[1] = ZDT_SOFT_LIMIT_BOTTOM;
+        }
+
+        motor_zdt_send_position(
+            1,
+            zdt_target[0] - zdt_abs_offset[0]
+        );
+
+        motor_zdt_send_position(
+            2,
+            zdt_target[1] - zdt_abs_offset[1]
+        );
+    }
+    }
         osDelay(10);
     }
 }

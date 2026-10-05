@@ -138,38 +138,53 @@
             <div class="flex flex-col gap-2">
                 <label class="text-xs text-slate-400">云台模式</label>
                 <div class="flex gap-2">
-                    <button id="gimbalFixedBtn" onclick="setGimbalMode(1)"
+                    <button id="gimbalFixedBtn" onclick="setGimbalMode(1); updateLiveGimbal()"
                             class="flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all btn-press
                                    bg-emerald-600/30 text-emerald-300 border border-emerald-500/50">
                         📌 固定速度
                     </button>
-                    <button id="gimbalRangeBtn" onclick="setGimbalMode(2)"
+                    <button id="gimbalRangeBtn" onclick="setGimbalMode(Number(document.getElementById('gimbalCurve').value)); updateLiveGimbal()"
                             class="flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all btn-press
                                    bg-slate-700 text-slate-300 border border-slate-600">
-                        🔄 区间变速
+                        🔄 变速曲线
                     </button>
                 </div>
             </div>
 
+            <div id="gimbalCurveGroup" class="hidden flex flex-col gap-2">
+                <label class="text-xs text-slate-400">变速函数</label>
+                <select id="gimbalCurve" onchange="setGimbalMode(Number(this.value)); updateLiveGimbal()" class="bg-slate-800 rounded p-2">
+                    <option value="2">三角波：匀速升降</option>
+                    <option value="3">sin 正弦：平滑升降速</option>
+                    <option value="4">方波：高低交替</option>
+                    <option value="5">随机保持：每周期随机速度</option>
+                </select>
+                <label class="text-xs text-slate-400">周期 / 随机保持时间（秒）</label>
+                <span id="gimbalPeriodHint" class="text-xs text-amber-300" aria-live="polite">选择曲线后自动计算最小周期</span>
+                <input id="gimbalPeriod" type="number" min="0.2" max="25.5" step="0.1" value="4" onchange="updateLiveGimbal()" class="bg-slate-800 rounded p-2">
+            </div>
+            <p class="text-xs text-slate-400">曲线在上下限之间变化；正反转请设负下限与正上限。最小周期按加速度计算并留出20%余量，实际速度取决于电机反馈。</p>
             <!-- 速度1：固定速度值 / 区间最低速度 -->
             <div class="flex flex-col gap-1.5">
                 <label id="gimbalSpeed1Label" class="text-xs text-slate-400">速度</label>
                 <div class="flex gap-2">
-                    <input type="number" id="gimbalSpeed" value="14" min="0" max="30" step="0.5"
+                   <input type="number" id="gimbalSpeed" oninput="syncGimbalSpeed(this.value, false)" value="14" min="-30" max="30" step="0.5"
                            class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm
                                   text-center focus:outline-none focus:border-emerald-500">
-                    <span class="text-xs text-slate-500 self-center whitespace-nowrap">rad/s</span>
+                    <span class="text-xs text-slate-500 self-center whitespace-nowrap">rad/s<br><span id="gimbalSpeedRps" class="text-emerald-300" aria-live="polite"></span></span>
                 </div>
             </div>
 
+            <input id="gimbalSpeedSlider" type="range" min="-30" max="30" step="0.1" value="14" oninput="syncGimbalSpeed(this.value, true)" class="w-full">
+            <span class="text-xs text-slate-400">拖动调整速度；云台启动后实时生效，负值反转</span>
             <!-- 速度2：区间最高速度（仅区间模式可见） -->
             <div id="gimbalSpeedMaxGroup" class="flex flex-col gap-1.5 hidden">
                 <label class="text-xs text-slate-400">最高速度</label>
                 <div class="flex gap-2">
-                    <input type="number" id="gimbalSpeedMax" value="25" min="0" max="30" step="0.5"
+                    <input type="number" id="gimbalSpeedMax" oninput="updateLiveGimbal()" value="25" min="-30" max="30" step="0.5"
                            class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm
                                   text-center focus:outline-none focus:border-emerald-500">
-                    <span class="text-xs text-slate-500 self-center whitespace-nowrap">rad/s</span>
+                    <span class="text-xs text-slate-500 self-center whitespace-nowrap">rad/s<br><span id="gimbalSpeedMaxRps" class="text-emerald-300" aria-live="polite"></span></span>
                 </div>
                 <span class="text-xs text-amber-400/70">必须大于最低速度</span>
             </div>
@@ -178,7 +193,7 @@
             <div class="flex flex-col gap-1.5">
                 <label class="text-xs text-slate-400">加速度</label>
                 <div class="flex gap-2">
-                    <input type="number" id="gimbalAccel" value="5" min="0" max="50" step="0.5"
+                    <input type="number" id="gimbalAccel" oninput="updateLiveGimbal()" value="5" min="0" max="50" step="0.5"
                            class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm
                                   text-center focus:outline-none focus:border-emerald-500">
                     <span class="text-xs text-slate-500 self-center whitespace-nowrap">rad/s²</span>
@@ -202,50 +217,60 @@
             </div>
         </div>
 
-        <!-- ── 卡片 3：装甲板 + 急停 ── -->
-        <div class="bg-slate-900/70 rounded-2xl border border-amber-900/30 p-5 flex flex-col gap-4">
-            <div class="flex items-center gap-3">
-                <span class="text-2xl">🛡️</span>
-                <h2 class="text-lg font-semibold text-amber-300">装甲板</h2>
-                <span class="text-xs text-slate-500 bg-slate-800 px-2 py-0.5 rounded">0x30</span>
-            </div>
+       <!-- ── 卡片 3：装甲板控制 ── -->
+	<div class="bg-slate-900/70 rounded-2xl border border-amber-900/30 p-5 flex flex-col gap-4">
 
-            <!-- 电机选择 -->
-            <div class="flex flex-col gap-1.5">
-                <label class="text-xs text-slate-400">电机选择</label>
-                <select id="armorMotor"
-                        class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm
-                               focus:outline-none focus:border-amber-500">
-                    <option value="0">0 — 全部并联</option>
-                    <option value="1">1 — 1号电机</option>
-                    <option value="2">2 — 2号电机</option>
-                </select>
-            </div>
+    	<div class="flex items-center gap-3">
+        	<span class="text-2xl">🛡️</span>
+        	<h2 class="text-lg font-semibold text-amber-300">装甲板</h2>
+        	<span class="text-xs text-slate-500 bg-slate-800 px-2 py-0.5 rounded">
+            	0x30
+        	</span>
+    	</div>
 
-            <!-- 加速度 -->
-            <div class="flex flex-col gap-1.5">
-                <label class="text-xs text-slate-400">加速度</label>
-                <input type="number" id="armorAccel" value="0" min="0" max="255"
-                       class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm
-                              text-center focus:outline-none focus:border-amber-500">
-                <span class="text-xs text-slate-500 self-center">0~255</span>
-            </div>
+    	<!-- 电机选择 -->
+    	<div class="flex flex-col gap-1.5">
+        	<label class="text-xs text-slate-400">控制电机</label>
 
-            <button onclick="sendArmorCfg()"
-                    class="bg-amber-600/70 hover:bg-amber-500 text-white text-sm font-medium
-                           py-2 px-4 rounded-lg transition-all btn-press">
-                ⚙ 设置参数
-            </button>
+        	<select id="armorMotor"
+                	class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm
+                       	focus:outline-none focus:border-amber-500">
 
-            <!-- 紧急停止 — 大红色按钮 -->
-            <button onclick="sendAllStop()"
-                    class="bg-red-700 hover:bg-red-600 text-white font-bold py-3.5 px-4 rounded-xl
-                           transition-all btn-press glow-red text-lg mt-2">
-                ⏹ 紧急停止
-            </button>
-        </div>
+            	<option value="0">两个同时控制</option>
+            	<option value="1">1号电机</option>
+            	<option value="2">2号电机</option>
 
-        <!-- ── 卡片 4：日志终端（全宽） ── -->
+        	</select>
+    	</div>
+
+        <label class="text-xs text-slate-400">自动升降：每个方向持续时间（秒）</label>
+        <input id="armorInterval" type="number" min="8" max="25.5" step="0.1" value="8" class="bg-slate-800 rounded p-2">
+        <button id="armorAutoBtn" onclick="toggleArmorAuto()" class="bg-amber-600 rounded py-2">▶ 自动上下</button>
+        <span class="text-xs text-slate-400">网页每100毫秒发送一次上升/下降命令，默认8秒后反向；到软件限位后等待反向；停止自动只停止继续下发。沿用原固件的回零与软限位要求。</span>
+    	<!-- 上下移动 -->
+    	<div class="grid grid-cols-2 gap-3 mt-2">
+
+        	<button onclick="armorMoveUp()"
+                	class="bg-emerald-600 hover:bg-emerald-500
+                       	text-white font-semibold py-4 rounded-xl
+                       	transition-all btn-press text-lg">
+            	↑ 上升
+        	</button>
+
+        	<button onclick="armorMoveDown()"
+                	class="bg-blue-600 hover:bg-blue-500
+                       	text-white font-semibold py-4 rounded-xl
+                       	transition-all btn-press text-lg">
+            	↓ 下降
+        	</button>
+
+    	</div>
+
+    	<div class="text-xs text-slate-500 text-center">
+        	每点击一次移动一个固定位置增量
+    	</div>
+
+</div>        <!-- ── 卡片 4：日志终端（全宽） ── -->
         <div class="md:col-span-2 lg:col-span-4 bg-slate-900/80 rounded-2xl border border-slate-700/50
                     flex flex-col h-64">
             <div class="flex justify-between items-center px-5 py-3 border-b border-slate-700/50">
@@ -261,6 +286,8 @@
 
     </main>
 
+    <button onclick="sendAllStop()" class="my-5 bg-red-600 rounded-xl px-8 py-3 font-bold">⏹ 全部停止</button>
+    <p class="text-xs text-slate-400">底盘、云台、装甲板分别启动，可同时运行。曲线与自动升降由网页发送原协议命令，请保持页面打开。</p>
     <!-- Toast -->
     <div id="toast" class="fixed bottom-8 right-8 bg-slate-800 border-l-4 text-white px-5 py-3
                             rounded-lg shadow-2xl transform translate-y-24 opacity-0
@@ -284,7 +311,7 @@
             CHASSIS_GO:  0x11,  // 底盘执行: D0=0停/1动
             GIMBAL_CFG:  0x20,  // 云台参数: D0=模式 D1=固定速度
             GIMBAL_GO:   0x21,  // 云台执行: D0=0停/1启动
-            ARMOR_CFG:   0x30,  // 装甲板:   D0=电机号 D1=加速度
+            ARMOR_MOVE:  0x30,  // D0=电机号 D1=方向
             ALL_STOP:    0xFF,  // 紧急停止
             HEARTBEAT:   0X01,  //心跳（断连检测）
         },
@@ -364,6 +391,7 @@
     }
 
     function toggleChassisGo() {
+        if (!isConnected) { showToast('请先连接串口', 'red'); return; }
         chassisRunning = !chassisRunning;
         const btn = document.getElementById('chassisGoBtn');
         const status = document.getElementById('chassisRunStatus');
@@ -394,6 +422,7 @@
 
     function setGimbalMode(mode) {
         gimbalMode = mode;
+        document.getElementById("gimbalCurveGroup").classList.toggle("hidden", mode === 1);
         const fBtn  = document.getElementById('gimbalFixedBtn');
         const rBtn  = document.getElementById('gimbalRangeBtn');
         const maxGrp = document.getElementById('gimbalSpeedMaxGroup');
@@ -418,45 +447,126 @@
         }
     }
 
+    let liveGimbalTimer;
+    function minimumGimbalPeriod() {
+        const input = id => parseFloat(document.getElementById(id).value);
+        const low=input('gimbalSpeed'), high=input('gimbalSpeedMax'), accel=input('gimbalAccel');
+        const encode = v => Math.sign(v)*Math.round(Math.abs(v)*127/30);
+        if (![low,high,accel].every(Number.isFinite) || Math.abs(low)>30 || Math.abs(high)>30 || high<=low || accel<0 || accel>50) return null;
+        const range=(encode(high)-encode(low))*30/127;
+        if (range<=0) return null;
+        const actualAccel=Math.round(accel*255/50)*50/255;
+        // 按 STM32 实際收到的离散参数计算，避免量化后加速度变小。
+        // 三角波往返：2Δv/a；正弦最大斜率：πΔv/a。
+        // 方波：4Δv/a，半周期至少留一半时间保持；随机：Δv/a。
+        const factor=({2:2,3:Math.PI,4:4,5:1})[gimbalMode] || 0;
+        return actualAccel===0 ? 0.2 : Math.max(0.2,Math.ceil(1.2*factor*range/actualAccel*10)/10);
+    }
+    function refreshGimbalPeriod() {
+        const hint=document.getElementById('gimbalPeriodHint');
+        const field=document.getElementById('gimbalPeriod');
+        if (gimbalMode===1) { field.min='0.2'; hint.textContent='固定速度无需周期'; return true; }
+        const minimum=minimumGimbalPeriod();
+        if (minimum===null) { hint.textContent='请填写有效的上下限与加速度'; return false; }
+        if (minimum>25.5) {
+            hint.textContent=`最小需要 ${minimum.toFixed(1)} 秒，超过25.5秒；请增大加速度或缩小速度范围`;
+            return false;
+        }
+        field.min=String(minimum);
+        if (Number.isFinite(parseFloat(field.value)) && parseFloat(field.value)<minimum) field.value=String(minimum);
+        const accel=parseFloat(document.getElementById('gimbalAccel').value);
+        hint.textContent=Math.round(accel*255/50)===0 ? '加速度编码为0：不限制斜坡，周期至少0.2秒' :
+            `${gimbalMode===5?'最小保持时间':'最小周期'}：${minimum.toFixed(1)} 秒（含20%余量${gimbalMode===4?'，方波含到达后保持时间':''}）`;
+        return true;
+    }
+    function updateGimbalRps() {
+        for (const [input, display] of [['gimbalSpeed','gimbalSpeedRps'],['gimbalSpeedMax','gimbalSpeedMaxRps']]) {
+            const value=parseFloat(document.getElementById(input).value);
+            document.getElementById(display).textContent=Number.isFinite(value) ? `${(value/(2*Math.PI)).toFixed(3)} 转/秒` : '— 转/秒';
+        }
+    }
+    function updateLiveGimbal() {
+        updateGimbalRps();
+        refreshGimbalPeriod();
+        if (gimbalRunning && !liveGimbalTimer) liveGimbalTimer = setTimeout(() => {
+            liveGimbalTimer = null;
+            if (gimbalRunning) sendGimbalCfg();
+        }, 100);
+    }
+    function syncGimbalSpeed(value, fromSlider) {
+        const speed = Number(value);
+        if (!Number.isFinite(speed) || Math.abs(speed)>30) return;
+        document.getElementById(fromSlider ? 'gimbalSpeed' : 'gimbalSpeedSlider').value = value;
+        updateLiveGimbal();
+    }
     function sendGimbalCfg() {
-        const speedRadS  = parseFloat(document.getElementById('gimbalSpeed').value) || 0;
-        const maxRadS    = parseFloat(document.getElementById('gimbalSpeedMax').value) || 0;
-        const accelRadS2 = parseFloat(document.getElementById('gimbalAccel').value) || 0;
-
-        /* 换算为协议层的 0~255 字节 */
-        const speedLow  = Math.round(speedRadS  * 255.0 / 30.0);
-        const speedHigh = Math.round(maxRadS    * 255.0 / 30.0);
-        const accel     = Math.round(accelRadS2 * 255.0 / 50.0);
-
-        let detail;
-        if (gimbalMode === 1) {
-            detail = `固定速度=${speedRadS.toFixed(1)} rad/s  加速度=${accelRadS2.toFixed(1)} rad/s²`;
-        } else {
-            if (maxRadS <= speedRadS) {
-                showToast('⚠️ 最高速度必须大于最低速度', 'red');
-                return;
-            }
-            detail = `区间变速 ${speedRadS.toFixed(1)}↔${maxRadS.toFixed(1)} rad/s  加速度=${accelRadS2.toFixed(1)} rad/s²`;
+        const low = parseFloat(document.getElementById('gimbalSpeed').value);
+        const high = gimbalMode === 1 ? low : parseFloat(document.getElementById('gimbalSpeedMax').value);
+        const accel = parseFloat(document.getElementById('gimbalAccel').value);
+        let period = parseFloat(document.getElementById('gimbalPeriod').value);
+        const encode = v => Math.sign(v) * Math.round(Math.abs(v)*127/30);
+        if (![low,high,accel,period].every(Number.isFinite) || Math.abs(low)>30 || Math.abs(high)>30 || accel<0 || accel>50 || period<0.2 || period>25.5 || (gimbalMode!==1 && encode(high)<=encode(low))) {
+            showToast('参数无效：速度 -30~30，上限须大于下限，加速度 0~50，周期 0.2~25.5秒', 'red');
+            return false;
         }
-
-        if (sendCmdFrame(PROTO.CMD.GIMBAL_CFG, gimbalMode, speedLow, speedHigh, accel, 0)) {
-            logSend('GIMBAL_CFG', detail);
+        if (!refreshGimbalPeriod()) {
+            showToast(document.getElementById('gimbalPeriodHint').textContent, 'red');
+            return false;
         }
+        period=parseFloat(document.getElementById('gimbalPeriod').value);
+        const ok=sendCmdFrame(PROTO.CMD.GIMBAL_CFG,1,encode(low)&255,encode(low)&255,Math.round(accel*255/50),0);
+        if (ok) {
+            curveConfig={mode:gimbalMode,low,high,accel:Math.round(accel*255/50),period};
+            if (gimbalRunning) startWebCurve();
+        }
+        if(ok) logSend('GIMBAL_CFG',`模式=${gimbalMode} 速度=${low}~${high} rad/s 周期=${period}s`);
+        return ok;
+    }
+
+    let curveTimer=null, curveConfig=null;
+    function stopWebCurve() {
+        if(curveTimer!==null) clearInterval(curveTimer);
+        curveTimer=null;
+    }
+    function startWebCurve() {
+        stopWebCurve();
+        if(!curveConfig || curveConfig.mode===1) return;
+        const cfg={...curveConfig}, start=performance.now();
+        let randomCycle=-1, randomValue=cfg.low;
+        const accel=cfg.accel===0 ? 100 : cfg.accel*50/255;
+        const entrySeconds=Math.abs(cfg.low)/accel;
+        curveTimer=setInterval(() => {
+            if(!isConnected || !gimbalRunning) { stopWebCurve(); return; }
+            const elapsed=Math.max(0,(performance.now()-start)/1000-entrySeconds);
+            const cycle=Math.floor(elapsed/cfg.period), phase=(elapsed%cfg.period)/cfg.period;
+            let unit;
+            if(cfg.mode===3) unit=0.5-0.5*Math.cos(2*Math.PI*phase);
+            else if(cfg.mode===4) unit=phase<0.5 ? 0 : 1;
+            else if(cfg.mode===5) {
+                if(cycle!==randomCycle) { randomCycle=cycle; randomValue=cfg.low+Math.random()*(cfg.high-cfg.low); }
+            } else unit=phase<0.5 ? 2*phase : 2*(1-phase);
+            const speed=cfg.mode===5 ? randomValue : cfg.low+(cfg.high-cfg.low)*unit;
+            const encoded=(Math.sign(speed)*Math.round(Math.abs(speed)*127/30))&255;
+            // 所有曲线使用原固件固定速度模式，由网页每100ms更新目标。
+            sendCmdFrame(PROTO.CMD.GIMBAL_CFG,1,encoded,encoded,cfg.accel,0);
+        },100);
     }
 
     function toggleGimbalGo() {
+        if (!isConnected) { showToast('请先连接串口', 'red'); return; }
+        if (!gimbalRunning && !sendGimbalCfg()) return;
         gimbalRunning = !gimbalRunning;
         const btn    = document.getElementById('gimbalGoBtn');
         const status = document.getElementById('gimbalRunStatus');
         if (gimbalRunning) {
             // 先发参数再启动，保证 STM32 拿到最新配置
-            sendGimbalCfg();
             btn.textContent = '⏹ 停止';
             btn.classList.replace('hover:bg-emerald-600', 'hover:bg-red-500');
             btn.classList.replace('bg-slate-700', 'bg-red-600/70');
             status.textContent = '运行中...';
             status.className = 'text-xs text-emerald-400';
             sendCmdFrame(PROTO.CMD.GIMBAL_GO, 1, 0, 0, 0, 0);
+            startWebCurve();
             logSend('GIMBAL_GO', '启动');
         } else {
             btn.textContent = '▶ 启动';
@@ -465,6 +575,7 @@
             status.textContent = '已停止';
             status.className = 'text-xs text-slate-500';
             sendCmdFrame(PROTO.CMD.GIMBAL_GO, 0, 0, 0, 0, 0);
+            stopWebCurve();
             logSend('GIMBAL_GO', '停止');
         }
     }
@@ -472,19 +583,91 @@
     /* ==========================================================
      *  📤 装甲板控制
      * ========================================================== */
-    function sendArmorCfg() {
-        const motor = parseInt(document.getElementById('armorMotor').value) || 0;
-        const accel = parseInt(document.getElementById('armorAccel').value) || 0;
-        if (sendCmdFrame(PROTO.CMD.ARMOR_CFG, motor, accel, 0, 0, 0)) {
-            logSend('ARMOR_CFG', `电机=${motor}  加速度=${accel}`);
-        }
+    let armorAutoRunning=false, armorAutoTimer=null;
+    function resetArmorAuto() {
+        if(armorAutoTimer!==null) clearInterval(armorAutoTimer);
+        armorAutoTimer=null;
+        armorAutoRunning=false;
+        document.getElementById('armorAutoBtn').textContent='▶ 自动上下';
     }
+    function toggleArmorAuto() {
+        if(armorAutoRunning) { resetArmorAuto(); logSend('ARMOR_AUTO','已停止继续发送升降命令'); return; }
+        if(!isConnected) { showToast('请先连接串口','red'); return; }
+        const seconds=parseFloat(document.getElementById('armorInterval').value);
+        const motor=Number(document.getElementById('armorMotor').value);
+        if(!Number.isFinite(seconds) || seconds<8 || seconds>25.5 || ![0,1,2].includes(motor)) {
+            showToast('单程时间须在 8~25.5 秒','red'); return;
+        }
+        const start=performance.now();
+        let lastSlot=-1;
+        armorAutoRunning=true;
+        document.getElementById('armorAutoBtn').textContent='⏹ 停止自动升降';
+        const tick=() => {
+            if(!isConnected || !armorAutoRunning) { resetArmorAuto(); return; }
+            const elapsed=(performance.now()-start)/1000;
+            const slot=Math.floor((performance.now()-start)/100);
+            if(slot===lastSlot) return;
+            // 不补发后台延迟期间漏掉的命令，避免突发积累。
+            lastSlot=slot;
+            const dir=Math.floor(elapsed/seconds)%2===0 ? 1 : 2;
+            sendCmdFrame(PROTO.CMD.ARMOR_MOVE,motor,dir,0,0,0);
+        };
+        tick();
+        armorAutoTimer=setInterval(tick,50);
+        logSend('ARMOR_AUTO',`网页自动升降：电机=${motor} 方向保持=${seconds}s 发送=10Hz`);
+    }
+  function armorMoveUp() {
+    if (isConnected) resetArmorAuto();
 
+    const motor =
+        parseInt(document.getElementById('armorMotor').value);
+
+    if (sendCmdFrame(
+        PROTO.CMD.ARMOR_MOVE,
+        motor,
+        1,
+        0,
+        0,
+        0
+    )) {
+        logSend(
+            'ARMOR_MOVE',
+            `电机=${motor}  ↑ 上升`
+        );
+    }
+}
+
+
+function armorMoveDown() {
+    if (isConnected) resetArmorAuto();
+
+    const motor =
+        parseInt(document.getElementById('armorMotor').value);
+
+    if (sendCmdFrame(
+        PROTO.CMD.ARMOR_MOVE,
+        motor,
+        2,
+        0,
+        0,
+        0
+    )) {
+        logSend(
+            'ARMOR_MOVE',
+            `电机=${motor}  ↓ 下降`
+        );
+    }
+}
     /* ==========================================================
      *  📤 紧急停止
      * ========================================================== */
     function sendAllStop() {
+        resetArmorAuto();
+        stopWebCurve();
         if (sendCmdFrame(PROTO.CMD.ALL_STOP, 0, 0, 0, 0, 0)) {
+            resetArmorAuto();
+            clearTimeout(liveGimbalTimer);
+            liveGimbalTimer = null;
             // 同步重置所有 UI 状态
             chassisRunning = false;
             gimbalRunning = false;
@@ -502,7 +685,7 @@
             document.getElementById('gimbalRunStatus').textContent = '已停止';
             document.getElementById('gimbalRunStatus').className = 'text-xs text-slate-500';
 
-            logSend('ALL_STOP', '⏹ 紧急停止！全部电机停转');
+            logSend('ALL_STOP', '停止网页自动发送，并发送原协议全部停止命令');
             showToast('⏹ 已发送紧急停止', 'red');
         }
     }
@@ -533,7 +716,10 @@
 
     document.getElementById('connectBtn').addEventListener('click', async () => {
         if (isConnected) {
-            // 断开
+            // 先发送全部停止，等待队列排空，再关闭串口。
+            sendAllStop();
+            if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer=null; }
+            await sendLock;
             isConnected = false;
             try { await port.close(); } catch(e) {}
             port = null;
@@ -606,6 +792,7 @@
         clearTimeout(toastTimer);
         toastTimer = setTimeout(() => t.classList.add('translate-y-24', 'opacity-0'), 2500);
     }
+    updateGimbalRps();
     </script>
 </body>
 </html>
