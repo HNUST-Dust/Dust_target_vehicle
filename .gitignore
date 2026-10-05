@@ -40,3 +40,17 @@ Desktop.ini
 
 # ========== 嵌套的旧副本 ==========
 target_vehicle - cmake/
+# Local environment, debugger settings and credentials
+.idea/
+.claude/
+.codex/
+.env
+.env.*
+!.env.example
+CMakeUserPresets.json
+.project
+.cproject
+.settings/
+*.launch
+config/
+flash.bat
